@@ -1,0 +1,3 @@
+"""
+Education Management System API
+"""
