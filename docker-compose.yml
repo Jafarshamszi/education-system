@@ -1,0 +1,175 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database Service
+  db:
+    image: postgres:15-alpine
+    container_name: education-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-lms}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-1111}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Django Backend Service (Port 8001)
+  backend-django:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.django
+    container_name: education-backend-django
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-1111}@db:5432/${POSTGRES_DB:-lms}
+      SECRET_KEY: ${DJANGO_SECRET_KEY:-your-secret-key-change-in-production}
+      DEBUG: ${DEBUG:-False}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,backend-django,nginx}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost}
+    volumes:
+      - ./backend:/app
+      - backend-static:/app/staticfiles
+      - backend-media:/app/media
+    ports:
+      - "8001:8001"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8001 --workers 4 --timeout 120"
+
+  # FastAPI Backend Service (Port 8000)
+  backend-fastapi:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.fastapi
+    container_name: education-backend-fastapi
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-1111}@db:5432/${POSTGRES_DB:-lms}
+      SECRET_KEY: ${FASTAPI_SECRET_KEY:-your-fastapi-secret-key}
+      DEBUG: ${DEBUG:-False}
+    volumes:
+      - ./backend:/app
+      - backend-uploads:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  # Micro Frontend 1: Admin Portal (Port 3000)
+  frontend-admin:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    container_name: education-frontend-admin
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend-django
+      - backend-fastapi
+    networks:
+      - app-network
+
+  # Micro Frontend 2: Teacher Portal (Port 3001)
+  frontend-teacher:
+    build:
+      context: ./frontend-teacher
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    container_name: education-frontend-teacher
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      NODE_ENV: production
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend-django
+      - backend-fastapi
+    networks:
+      - app-network
+
+  # Micro Frontend 3: Student Portal (Port 3002)
+  frontend-student:
+    build:
+      context: ./frontend-student
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+    container_name: education-frontend-student
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api/v1}
+      NODE_ENV: production
+    ports:
+      - "3002:3000"
+    depends_on:
+      - backend-django
+      - backend-fastapi
+    networks:
+      - app-network
+
+  # Nginx Reverse Proxy & API Gateway
+  nginx:
+    image: nginx:stable-alpine
+    container_name: education-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - backend-static:/var/www/static:ro
+      - backend-media:/var/www/media:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend-django
+      - backend-fastapi
+      - frontend-admin
+      - frontend-teacher
+      - frontend-student
+    networks:
+      - app-network
+
+# Named volumes for data persistence
+volumes:
+  db-data:
+    driver: local
+  backend-static:
+    driver: local
+  backend-media:
+    driver: local
+  backend-uploads:
+    driver: local
+
+# Custom network for inter-service communication
+networks:
+  app-network:
+    driver: bridge

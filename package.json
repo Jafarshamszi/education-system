@@ -1,0 +1,43 @@
+{
+  "name": "education-system-monorepo",
+  "version": "1.0.0",
+  "description": "Education Management System - Monorepo",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "install:backend": "cd backend && pip install -r requirements.txt",
+    "install:frontend": "cd frontend && npm install",
+    "dev:backend": "cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build:frontend": "cd frontend && npm run build",
+    "test:backend": "cd backend && python -m pytest",
+    "test:frontend": "cd frontend && npm test",
+    "lint:backend": "cd backend && python -m flake8 app/",
+    "lint:frontend": "cd frontend && npm run lint",
+    "format:backend": "cd backend && python -m black app/ && python -m isort app/",
+    "format:frontend": "cd frontend && npm run format"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "education",
+    "fastapi",
+    "react",
+    "postgresql",
+    "monorepo"
+  ],
+  "author": "Education System Team",
+  "license": "MIT",
+  "dependencies": {
+    "typescript": "^5.9.3"
+  }
+}
